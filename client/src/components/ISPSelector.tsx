@@ -25,7 +25,7 @@ interface ISPSelectorProps {
 
 export function ISPSelector({ isps, selectedISPs, onSelectionChange, isLoading }: ISPSelectorProps) {
   const [searchQuery, setSearchQuery] = useState("");
-  const [countryFilter, setCountryFilter] = useState<string>("all");
+  const [countryFilter, setCountryFilter] = useState<string>("Brazil");
   const [stateFilter, setStateFilter] = useState<string>("all");
 
   const countries = useMemo(() => {
