@@ -34,13 +34,13 @@ export default function Home() {
     queryKey: ['/api/evomi/isps'],
   });
 
-  const startTestMutation = useMutation({
+  const startTestMutation = useMutation<{ testId: string }, Error, EvomiISP[]>({
     mutationFn: async (selectedProxies: EvomiISP[]) => {
       const response = await apiRequest('POST', '/api/test/start', {
         proxies: selectedProxies,
         concurrency: 10,
       });
-      return response;
+      return await response.json();
     },
     onSuccess: (data: { testId: string }) => {
       setIsTesting(true);
