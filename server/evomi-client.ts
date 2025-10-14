@@ -1,60 +1,166 @@
 import type { EvomiISP } from '@shared/schema';
 
+interface EvomiSettingsResponse {
+  success: boolean;
+  data: {
+    rp?: {
+      countries?: Record<string, string>;
+      cities?: { data: any[] };
+      regions?: { data: any[] };
+      isp?: Record<string, { value: string; countryCode: string }>;
+    };
+    mp?: {
+      isp?: Record<string, { value: string; countryCode: string }>;
+    };
+  };
+}
+
+interface EvomiProxyData {
+  success: boolean;
+  products: {
+    rp?: {
+      username: string;
+      password: string;
+      endpoint: string;
+      ports: { http: number; socks5: number };
+    };
+  };
+}
+
 export class EvomiClient {
   private apiKey: string;
+  private cachedCredentials: { username: string; password: string; endpoint: string; port: number } | null = null;
 
   constructor(apiKey: string) {
     this.apiKey = apiKey;
   }
 
-  async getAvailableISPs(): Promise<EvomiISP[]> {
-    const mockISPs: EvomiISP[] = [
-      { name: "AT&T Internet Services", asn: "AS7018", country: "United States", state: "California", city: "Los Angeles" },
-      { name: "Verizon Business", asn: "AS701", country: "United States", state: "New York", city: "New York" },
-      { name: "Comcast Cable", asn: "AS7922", country: "United States", state: "Pennsylvania", city: "Philadelphia" },
-      { name: "Deutsche Telekom AG", asn: "AS3320", country: "Germany", state: "Bavaria", city: "Munich" },
-      { name: "British Telecom", asn: "AS2856", country: "United Kingdom", state: "England", city: "London" },
-      { name: "Orange S.A.", asn: "AS3215", country: "France", state: "Île-de-France", city: "Paris" },
-      { name: "Vodafone Italia", asn: "AS30722", country: "Italy", state: "Lombardy", city: "Milan" },
-      { name: "Telefonica Spain", asn: "AS3352", country: "Spain", state: "Madrid", city: "Madrid" },
-      { name: "KPN Netherlands", asn: "AS1136", country: "Netherlands", state: "North Holland", city: "Amsterdam" },
-      { name: "Swisscom", asn: "AS3303", country: "Switzerland", state: "Zurich", city: "Zurich" },
-      { name: "NTT Communications", asn: "AS2914", country: "Japan", state: "Tokyo", city: "Tokyo" },
-      { name: "China Telecom", asn: "AS4134", country: "China", state: "Beijing", city: "Beijing" },
-      { name: "KDDI Corporation", asn: "AS2516", country: "Japan", state: "Osaka", city: "Osaka" },
-      { name: "Singtel", asn: "AS7473", country: "Singapore", city: "Singapore" },
-      { name: "Telstra Corporation", asn: "AS1221", country: "Australia", state: "New South Wales", city: "Sydney" },
-      { name: "Optus Australia", asn: "AS4804", country: "Australia", state: "Victoria", city: "Melbourne" },
-      { name: "Bell Canada", asn: "AS577", country: "Canada", state: "Ontario", city: "Toronto" },
-      { name: "Rogers Communications", asn: "AS812", country: "Canada", state: "Ontario", city: "Toronto" },
-      { name: "Telmex Colombia", asn: "AS10620", country: "Colombia", city: "Bogota" },
-      { name: "Claro Brasil", asn: "AS28573", country: "Brazil", state: "São Paulo", city: "São Paulo" },
-      { name: "Telefonica Argentina", asn: "AS7303", country: "Argentina", city: "Buenos Aires" },
-      { name: "Tata Communications", asn: "AS6453", country: "India", state: "Maharashtra", city: "Mumbai" },
-      { name: "Airtel India", asn: "AS45609", country: "India", state: "Delhi", city: "New Delhi" },
-      { name: "Etisalat UAE", asn: "AS5384", country: "United Arab Emirates", city: "Dubai" },
-      { name: "MTN South Africa", asn: "AS36994", country: "South Africa", city: "Johannesburg" },
-      { name: "Turkcell", asn: "AS47524", country: "Turkey", city: "Istanbul" },
-      { name: "Cox Communications", asn: "AS22773", country: "United States", state: "Arizona", city: "Phoenix" },
-      { name: "Charter Communications", asn: "AS20115", country: "United States", state: "Missouri", city: "St. Louis" },
-      { name: "CenturyLink", asn: "AS209", country: "United States", state: "Louisiana", city: "Monroe" },
-      { name: "Cogent Communications", asn: "AS174", country: "United States", state: "District of Columbia", city: "Washington" },
-      { name: "Level 3 Communications", asn: "AS3356", country: "United States", state: "Colorado", city: "Broomfield" },
-      { name: "Hurricane Electric", asn: "AS6939", country: "United States", state: "California", city: "Fremont" },
-      { name: "NTT America", asn: "AS2914", country: "United States", state: "Virginia", city: "Ashburn" },
-      { name: "Zayo Bandwidth", asn: "AS8218", country: "United States", state: "Colorado", city: "Boulder" },
-      { name: "GTT Communications", asn: "AS3257", country: "United States", state: "Virginia", city: "McLean" },
-    ];
+  async getCredentials(): Promise<{ username: string; password: string; endpoint: string; port: number }> {
+    if (this.cachedCredentials) {
+      return this.cachedCredentials;
+    }
 
-    return mockISPs;
+    if (!this.apiKey) {
+      throw new Error('EVOMI_API_KEY not configured');
+    }
+
+    const response = await fetch('https://api.evomi.com/public', {
+      headers: {
+        'x-apikey': this.apiKey,
+      },
+    });
+
+    if (!response.ok) {
+      throw new Error(`Evomi API error: ${response.status} ${response.statusText}`);
+    }
+
+    const data: EvomiProxyData = await response.json();
+    
+    if (!data.success || !data.products.rp) {
+      throw new Error('No Premium Residential proxy product available');
+    }
+
+    this.cachedCredentials = {
+      username: data.products.rp.username,
+      password: data.products.rp.password,
+      endpoint: data.products.rp.endpoint,
+      port: data.products.rp.ports.http,
+    };
+
+    return this.cachedCredentials;
   }
 
-  getProxyUrl(isp: EvomiISP): string {
-    const country = isp.country.toLowerCase().replace(/\s+/g, '-');
-    const state = isp.state?.toLowerCase().replace(/\s+/g, '-') || 'any';
-    const city = isp.city?.toLowerCase().replace(/\s+/g, '-') || 'any';
-    const ispName = isp.name.toLowerCase().replace(/\s+/g, '-');
+  async getAvailableISPs(): Promise<EvomiISP[]> {
+    if (!this.apiKey) {
+      console.warn('Using mock ISP data - EVOMI_API_KEY not configured');
+      return this.getMockISPs();
+    }
+
+    try {
+      const response = await fetch('https://api.evomi.com/public/settings', {
+        headers: {
+          'x-apikey': this.apiKey,
+        },
+      });
+
+      if (!response.ok) {
+        console.error(`Evomi settings API error: ${response.status}`);
+        return this.getMockISPs();
+      }
+
+      const data: EvomiSettingsResponse = await response.json();
+      
+      if (!data.success) {
+        console.error('Evomi settings API returned success=false');
+        return this.getMockISPs();
+      }
+
+      const isps: EvomiISP[] = [];
+      const countries = data.data.rp?.countries || {};
+
+      if (data.data.rp?.isp) {
+        for (const [ispName, ispData] of Object.entries(data.data.rp.isp)) {
+          const countryName = countries[ispData.countryCode] || ispData.countryCode;
+          
+          isps.push({
+            name: ispName,
+            asn: ispData.value,
+            country: countryName,
+          });
+        }
+      }
+
+      if (data.data.mp?.isp) {
+        for (const [ispName, ispData] of Object.entries(data.data.mp.isp)) {
+          const countryName = countries[ispData.countryCode] || ispData.countryCode;
+          
+          const exists = isps.some(isp => 
+            isp.name === ispName && isp.country === countryName
+          );
+          
+          if (!exists) {
+            isps.push({
+              name: ispName,
+              asn: ispData.value,
+              country: countryName,
+            });
+          }
+        }
+      }
+
+      console.log(`Loaded ${isps.length} ISPs from Evomi API`);
+      return isps.sort((a, b) => a.name.localeCompare(b.name));
+    } catch (error) {
+      console.error('Error fetching ISPs from Evomi:', error);
+      return this.getMockISPs();
+    }
+  }
+
+  private getMockISPs(): EvomiISP[] {
+    return [
+      { name: "Claro Brasil", asn: "AS28573", country: "Brazil" },
+      { name: "AT&T", asn: "AS7018", country: "United States" },
+      { name: "Verizon", asn: "AS701", country: "United States" },
+      { name: "Comcast", asn: "AS7922", country: "United States" },
+      { name: "Deutsche Telekom", asn: "AS3320", country: "Germany" },
+      { name: "British Telecom", asn: "AS2856", country: "United Kingdom" },
+      { name: "Orange", asn: "AS3215", country: "France" },
+      { name: "Vodafone", asn: "AS30722", country: "Italy" },
+    ];
+  }
+
+  getProxyConfig(isp: EvomiISP, credentials: { username: string; password: string; endpoint: string; port: number }): {
+    host: string;
+    port: number;
+    auth: string;
+  } {
+    const ispCode = isp.asn || isp.name.toLowerCase().replace(/\s+/g, '-');
+    const password = `${credentials.password}_isp-${ispCode}`;
     
-    return `http://${country}.${state}.${city}.${ispName}.evomi.com:8080`;
+    return {
+      host: credentials.endpoint,
+      port: credentials.port,
+      auth: `${credentials.username}:${password}`,
+    };
   }
 }

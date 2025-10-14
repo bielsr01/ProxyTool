@@ -3,6 +3,7 @@ import type { EvomiISP, ProxyTestResultResponse } from '@shared/schema';
 import { EvomiClient } from './evomi-client';
 import { DbIpClient } from './dbip-client';
 import { randomUUID } from 'crypto';
+import { HttpsProxyAgent } from 'https-proxy-agent';
 
 export interface TestOptions {
   targetUrl?: string;
@@ -36,70 +37,76 @@ export class ProxyTester {
     };
 
     try {
+      const credentials = await this.evomiClient.getCredentials();
+      const proxyConfig = this.evomiClient.getProxyConfig(isp, credentials);
+      
+      const proxyUrl = `http://${proxyConfig.auth}@${proxyConfig.host}:${proxyConfig.port}`;
+      const agent = new HttpsProxyAgent(proxyUrl);
+
       const pingStart = performance.now();
-      await fetch(targetUrl, {
+      const pingResponse = await fetch(targetUrl, {
         method: 'HEAD',
-        signal: AbortSignal.timeout(3000),
+        signal: AbortSignal.timeout(10000),
         headers: {
           'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
         },
-      }).catch(() => {});
+        // @ts-ignore
+        agent,
+      });
       const pingEnd = performance.now();
-      const pingLatency = Math.max(15, pingEnd - pingStart);
+      const pingLatency = pingEnd - pingStart;
 
-      const httpStart = performance.now();
-      await fetch(targetUrl, {
-        signal: AbortSignal.timeout(5000),
-        headers: {
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-        },
-      }).catch(() => {});
-      const httpEnd = performance.now();
-      const httpResponseTime = Math.max(30, httpEnd - httpStart);
-
-      const ispHash = this.hashString(isp.name + isp.country + (isp.city || ''));
-      const locationFactor = isp.country === 'United States' ? 0.8 : 
-                            isp.country === 'United Kingdom' ? 0.9 :
-                            isp.country === 'Germany' ? 0.85 :
-                            isp.country === 'Japan' ? 1.1 :
-                            isp.country === 'Australia' ? 1.3 :
-                            1.0;
-      
-      const basePing = 20 + (ispHash % 100);
-      const baseHttp = 50 + (ispHash % 150);
-      
-      result.pingLatency = basePing * locationFactor + (Math.random() * 20 - 10);
-      result.httpResponseTime = baseHttp * locationFactor + (Math.random() * 30 - 15);
-      result.totalTime = result.pingLatency + result.httpResponseTime;
-      
-      const failureRate = 0.08;
-      if (Math.random() < failureRate) {
-        result.status = Math.random() < 0.6 ? 'timeout' : 'failed';
-        result.errorMessage = result.status === 'timeout' 
-          ? 'Connection timeout after 30000ms'
-          : 'Network error: ECONNREFUSED';
-        result.pingLatency = undefined;
-        result.httpResponseTime = undefined;
-        result.totalTime = undefined;
-      } else {
-        result.status = 'success';
+      if (!pingResponse.ok) {
+        throw new Error(`HTTP ${pingResponse.status}: ${pingResponse.statusText}`);
       }
 
-      if (result.status === 'success') {
-        try {
-          const mockIp = this.generateMockIp(isp);
-          const dbipInfo = await this.dbipClient.getIpInfo(mockIp);
+      const httpStart = performance.now();
+      const httpResponse = await fetch(targetUrl, {
+        signal: AbortSignal.timeout(15000),
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+        },
+        // @ts-ignore
+        agent,
+      });
+      const httpEnd = performance.now();
+      const httpResponseTime = httpEnd - httpStart;
+
+      if (!httpResponse.ok) {
+        throw new Error(`HTTP ${httpResponse.status}: ${httpResponse.statusText}`);
+      }
+
+      result.pingLatency = Math.round(pingLatency * 100) / 100;
+      result.httpResponseTime = Math.round(httpResponseTime * 100) / 100;
+      result.totalTime = Math.round((pingLatency + httpResponseTime) * 100) / 100;
+      result.status = 'success';
+
+      try {
+        const ipCheckResponse = await fetch('https://api.ipify.org?format=json', {
+          signal: AbortSignal.timeout(5000),
+          // @ts-ignore
+          agent,
+        });
+        
+        if (ipCheckResponse.ok) {
+          const ipData = await ipCheckResponse.json();
+          const proxyIp = ipData.ip;
+          
+          const dbipInfo = await this.dbipClient.getIpInfo(proxyIp);
           if (dbipInfo) {
             result.dbipInfo = dbipInfo;
           }
-        } catch (error) {
-          console.error('Error enriching with DB-IP:', error);
         }
+      } catch (error) {
+        console.error('Error enriching with DB-IP:', error);
       }
 
     } catch (error: any) {
-      result.status = error.name === 'TimeoutError' ? 'timeout' : 'failed';
-      result.errorMessage = error.message;
+      result.status = error.name === 'AbortError' || error.name === 'TimeoutError' ? 'timeout' : 'failed';
+      result.errorMessage = error.message || 'Connection failed';
+      result.pingLatency = undefined;
+      result.httpResponseTime = undefined;
+      result.totalTime = undefined;
     }
 
     return result;
