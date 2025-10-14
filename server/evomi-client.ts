@@ -7,10 +7,10 @@ interface EvomiSettingsResponse {
       countries?: Record<string, string>;
       cities?: { data: any[] };
       regions?: { data: any[] };
-      isp?: Record<string, { value: string; countryCode: string }>;
+      isp?: Record<string, { label: string; countries: string[] }>;
     };
     mp?: {
-      isp?: Record<string, { value: string; countryCode: string }>;
+      isp?: Record<string, { label: string; countries: string[] }>;
     };
   };
 }
@@ -99,31 +99,35 @@ export class EvomiClient {
       const countries = data.data.rp?.countries || {};
 
       if (data.data.rp?.isp) {
-        for (const [ispName, ispData] of Object.entries(data.data.rp.isp)) {
-          const countryName = countries[ispData.countryCode] || ispData.countryCode;
-          
-          isps.push({
-            name: ispName,
-            asn: ispData.value,
-            country: countryName,
-          });
+        for (const [ispCode, ispData] of Object.entries(data.data.rp.isp)) {
+          for (const countryCode of ispData.countries) {
+            const countryName = countries[countryCode] || countryCode;
+            
+            isps.push({
+              name: ispData.label,
+              asn: ispCode,
+              country: countryName,
+            });
+          }
         }
       }
 
       if (data.data.mp?.isp) {
-        for (const [ispName, ispData] of Object.entries(data.data.mp.isp)) {
-          const countryName = countries[ispData.countryCode] || ispData.countryCode;
-          
-          const exists = isps.some(isp => 
-            isp.name === ispName && isp.country === countryName
-          );
-          
-          if (!exists) {
-            isps.push({
-              name: ispName,
-              asn: ispData.value,
-              country: countryName,
-            });
+        for (const [ispCode, ispData] of Object.entries(data.data.mp.isp)) {
+          for (const countryCode of ispData.countries) {
+            const countryName = countries[countryCode] || countryCode;
+            
+            const exists = isps.some(isp => 
+              isp.name === ispData.label && isp.country === countryName
+            );
+            
+            if (!exists) {
+              isps.push({
+                name: ispData.label,
+                asn: ispCode,
+                country: countryName,
+              });
+            }
           }
         }
       }
